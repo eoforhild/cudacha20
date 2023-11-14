@@ -37,12 +37,6 @@ void vec_addassign(uint32_t* dst, uint32_t* src, int size) {
     }
 }
 
-/**
- * Generates a keystream
- * 
- * Args:
- *  stream - Where the result will be stored
-*/
 void chacha20_block(
     uint32_t* stream, 
     uint32_t* key, 
@@ -72,7 +66,6 @@ void block_xor(uint32_t* result, uint32_t* stream, uint32_t* block) {
 }
 
 void bytes_xor(char* result, int size, char* stream, char* block) {
-    printf("\n");
     for (int i = 0; i < size; i++) {
         result[i] = stream[i] ^ block[i];
     }
@@ -82,24 +75,22 @@ void chacha20_encrypt(
     uint32_t* key, 
     uint32_t counter, 
     uint32_t* nonce, 
-    char* plaintext,
-    char* result
+    char* data,
+    char* result,
+    int len
 ) {
-    int len = strlen(plaintext);
     for (int j = 0; j < (int)floor((double)len/64.0); j++) {
         uint32_t stream[16];
         chacha20_block(stream, key, counter+j, nonce);
-        block_xor((uint32_t*)(&result[j*64]), stream, (uint32_t*)(&plaintext[j*64]));
+        block_xor((uint32_t*)(&result[j*64]), stream, (uint32_t*)(&data[j*64]));
     }
     if (len % 64 != 0) {
         int j = (int)floor((double)len/64.0);
         uint32_t stream[16];
         chacha20_block(stream, key, counter+j, nonce);
-        bytes_xor(&result[j*64], len%64, (char*)stream, &plaintext[j*64]);
+        bytes_xor(&result[j*64], len%64, (char*)stream, &data[j*64]);
     }
 }
-
-
 
 int main(int argc, char* argv[]) {
     uint32_t key[8] = {0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
@@ -107,13 +98,16 @@ int main(int argc, char* argv[]) {
     uint32_t counter = 1;
     uint32_t nonce[3] = {0x00000000, 0x4a000000, 0x00000000};
     char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
-    char* result = (char*)malloc(strlen(plaintext)*sizeof(char));
-    chacha20_encrypt(key, counter, nonce, plaintext, result);
-    for (int i = 0; i < strlen(plaintext); i++) {
+    char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    int len = strlen(plaintext);
+    chacha20_encrypt(key, counter, nonce, plaintext, result, len);
+    chacha20_encrypt(key, counter, nonce, result, dc, len);
+    for (int i = 0; i < len; i++) {
         if (i != 0 && i%16 == 0) {
             printf("\n");
         }
-        printf("%02x ", (unsigned char)result[i]);
+        printf("%02x ", (unsigned char)dc[i]);
     }
-    // printf("%x\n", *(uint32_t*)&result[0]);
+    // printf("%s\n", plaintext);
 }
