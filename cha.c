@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <time.h>
 #include <string.h>
 #include <sodium.h>
 #include <math.h>
@@ -71,43 +73,70 @@ void bytes_xor(char* result, int size, char* stream, char* block) {
     }
 }
 
-void chacha20_encrypt(
-    uint32_t* key, 
-    uint32_t counter, 
-    uint32_t* nonce, 
+int chacha20_cipher(
     char* data,
     char* result,
-    int len
+    int len,
+    uint32_t* key, 
+    uint32_t counter, 
+    uint32_t* nonce
 ) {
+    int toRet = 0;
+    uint32_t stream[16];
     for (int j = 0; j < (int)floor((double)len/64.0); j++) {
-        uint32_t stream[16];
+        toRet = j;
         chacha20_block(stream, key, counter+j, nonce);
         block_xor((uint32_t*)(&result[j*64]), stream, (uint32_t*)(&data[j*64]));
     }
     if (len % 64 != 0) {
         int j = (int)floor((double)len/64.0);
-        uint32_t stream[16];
+        toRet = j;
         chacha20_block(stream, key, counter+j, nonce);
         bytes_xor(&result[j*64], len%64, (char*)stream, &data[j*64]);
     }
+    return toRet + 1;
+}
+
+void file_cipher(char* path, uint32_t* key, uint32_t* nonce) {
+    int CHUNKSIZE = 65536;
+    char buf[CHUNKSIZE];
+    char res[CHUNKSIZE];
+    int len = 0;
+    int counter = 1;
+
+    FILE* input = fopen(path, "r");
+    FILE* output = fopen("out.txt", "w");
+    do {
+        len = fread((void*)buf, sizeof(char), CHUNKSIZE, input);
+        counter += chacha20_cipher(buf, res, len, key, counter, nonce);
+        fwrite(res, sizeof(char), len, output);
+    } while (len == CHUNKSIZE);
+    fclose(input);
+    fclose(output);
 }
 
 int main(int argc, char* argv[]) {
     uint32_t key[8] = {0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
                     0x13121110, 0x17161514, 0x1b1a1918, 0x1f1e1d1c};
-    uint32_t counter = 1;
     uint32_t nonce[3] = {0x00000000, 0x4a000000, 0x00000000};
-    char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
-    char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    int len = strlen(plaintext);
-    chacha20_encrypt(key, counter, nonce, plaintext, result, len);
-    chacha20_encrypt(key, counter, nonce, result, dc, len);
-    for (int i = 0; i < len; i++) {
-        if (i != 0 && i%16 == 0) {
-            printf("\n");
-        }
-        printf("%02x ", (unsigned char)dc[i]);
-    }
+    // char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+    // char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    // char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    // int len = strlen(plaintext);
+    // chacha20_encrypt(plaintext, result, len, key, counter, nonce);
+    // chacha20_encrypt(result, dc, len, key, counter, nonce);
+    // for (int i = 0; i < len; i++) {
+    //     if (i != 0 && i%16 == 0) {
+    //         printf("\n");
+    //     }
+    //     printf("%02x ", (unsigned char)dc[i]);
+    // }
     // printf("%s\n", plaintext);
+    char* tt = "googlechrome.dmg";
+    clock_t t;
+    t = clock();
+    file_cipher(tt, key, nonce);
+    t = clock() - t;
+    double time_taken = ((double)t)/CLOCKS_PER_SEC; // calculate the elapsed time
+    printf("The program took %f seconds to execute", time_taken);
 }
