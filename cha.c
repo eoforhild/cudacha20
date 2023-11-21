@@ -5,138 +5,121 @@
 #include <string.h>
 #include <sodium.h>
 #include <math.h>
+#include "cha.h"
 
 const uint32_t CHACONST[4] = {0x61707865, 0x3320646e, 0x79622d32, 0x6b206574};
 
 /* Left rotation of n by d bits */
-#define INT_BITS 32
-uint32_t leftRotate(uint32_t n, unsigned int d) {
-    return (n << d) | (n >> (INT_BITS - d));
-}
+#define leftRotate(n, d) \
+    (n << d) | (n >> (32 - d));
 
-void quarterRound(uint32_t* arr, int a, int b, int c, int d) {
-    arr[a] += arr[b]; arr[d] ^= arr[a]; arr[d] = leftRotate(arr[d], 16);
-    arr[c] += arr[d]; arr[b] ^= arr[c]; arr[b] = leftRotate(arr[b], 12);
-    arr[a] += arr[b]; arr[d] ^= arr[a]; arr[d] = leftRotate(arr[d], 8);
+#define QUARTERROUND(arr, a, b, c, d) \
+    arr[a] += arr[b]; arr[d] ^= arr[a]; arr[d] = leftRotate(arr[d], 16); \
+    arr[c] += arr[d]; arr[b] ^= arr[c]; arr[b] = leftRotate(arr[b], 12); \
+    arr[a] += arr[b]; arr[d] ^= arr[a]; arr[d] = leftRotate(arr[d], 8); \
     arr[c] += arr[d]; arr[b] ^= arr[c]; arr[b] = leftRotate(arr[b], 7);
-}
 
-void chacha(uint32_t* state) {
-    quarterRound(state, 0, 4, 8, 12);
-    quarterRound(state, 1, 5, 9, 13);
-    quarterRound(state, 2, 6, 10, 14);
-    quarterRound(state, 3, 7, 11, 15);
+/**
+ * Consumes current state and increment the counter
+*/
+void chacha20_block(struct chacha_ctx* ctx) {
+    uint32_t* keystream = ctx->keystream;
+    uint32_t* state = ctx->state;
 
-    quarterRound(state, 0, 5, 10, 15);
-    quarterRound(state, 1, 6, 11, 12);
-    quarterRound(state, 2, 7, 8, 13);
-    quarterRound(state, 3, 4, 9, 14);
-}
-
-void vec_addassign(uint32_t* dst, uint32_t* src, int size) {
-    for (int i = 0; i < size; i++) {
-        dst[i] += src[i];
-    }
-}
-
-void chacha20_block(
-    uint32_t* stream, 
-    uint32_t* key, 
-    uint32_t counter, 
-    uint32_t* nonce
-) {
-    uint32_t state[16];
-    uint32_t initial_state[16];
-    // Set up the state block
-    memcpy(state, CHACONST, 4 * sizeof(uint32_t));
-    memcpy(state+4, key, 8 * sizeof(uint32_t));
-    state[12] = counter;
-    memcpy(state+13, nonce, 3 * sizeof(uint32_t));
-
-    memcpy(initial_state, state, 16 * sizeof(uint32_t));
+    memcpy(keystream, state, 16 * sizeof(uint32_t));
     for (int i = 0; i < 10; i++) {
-        chacha(state);
+        QUARTERROUND(keystream, 0, 4, 8, 12);
+        QUARTERROUND(keystream, 1, 5, 9, 13);
+        QUARTERROUND(keystream, 2, 6, 10, 14);
+        QUARTERROUND(keystream, 3, 7, 11, 15);
+        QUARTERROUND(keystream, 0, 5, 10, 15);
+        QUARTERROUND(keystream, 1, 6, 11, 12);
+        QUARTERROUND(keystream, 2, 7, 8, 13);
+        QUARTERROUND(keystream, 3, 4, 9, 14);
     }
-    vec_addassign(state, initial_state, 16);
-    memcpy(stream, state, 16 * sizeof(uint32_t));
+
+    for (int i = 0; i < 16; i++) keystream[i] += state[i];
+    *ctx->counter += 1;
 }
 
-void block_xor(uint32_t* result, uint32_t* stream, uint32_t* block) {
-    for (int i = 0; i < 16; i++) {
-        result[i] = stream[i] ^ block[i];
-    }
-}
-
-void bytes_xor(char* result, int size, char* stream, char* block) {
+void bytes_xor(char* result, int size, char* a, char* b) {
     for (int i = 0; i < size; i++) {
-        result[i] = stream[i] ^ block[i];
+        result[i] = a[i] ^ b[i];
     }
 }
 
-int chacha20_cipher(
-    char* data,
-    char* result,
-    int len,
-    uint32_t* key, 
-    uint32_t counter, 
-    uint32_t* nonce
-) {
-    int toRet = 0;
-    uint32_t stream[16];
+/**
+ * Takes in a chacha_ctx and a byte array and xors it
+*/
+void chacha20_xor(struct chacha_ctx* ctx, char* buf, int len) {
     for (int j = 0; j < (int)floor((double)len/64.0); j++) {
-        toRet = j;
-        chacha20_block(stream, key, counter+j, nonce);
-        block_xor((uint32_t*)(&result[j*64]), stream, (uint32_t*)(&data[j*64]));
+        chacha20_block(ctx);
+        bytes_xor((&buf[j*64]), 64, (char*)ctx->keystream, &buf[j*64]);
     }
     if (len % 64 != 0) {
         int j = (int)floor((double)len/64.0);
-        toRet = j;
-        chacha20_block(stream, key, counter+j, nonce);
-        bytes_xor(&result[j*64], len%64, (char*)stream, &data[j*64]);
+        chacha20_block(ctx);
+        bytes_xor(&buf[j*64], len%64, (char*)ctx->keystream, &buf[j*64]);
     }
-    return toRet + 1;
 }
 
-void file_cipher(char* path, uint32_t* key, uint32_t* nonce) {
+void file_xor(struct chacha_ctx* ctx, char* path) {
     int CHUNKSIZE = 65536;
     char buf[CHUNKSIZE];
-    char res[CHUNKSIZE];
     int len = 0;
-    int counter = 1;
 
     FILE* input = fopen(path, "r");
-    FILE* output = fopen("out.txt", "w");
+    FILE* output = fopen("out.bin", "w");
     do {
         len = fread((void*)buf, sizeof(char), CHUNKSIZE, input);
-        counter += chacha20_cipher(buf, res, len, key, counter, nonce);
-        fwrite(res, sizeof(char), len, output);
+        chacha20_xor(ctx, buf, len);
+        fwrite(buf, sizeof(char), len, output);
     } while (len == CHUNKSIZE);
     fclose(input);
     fclose(output);
 }
 
+void init_chacha_ctx(struct chacha_ctx* ctx, uint32_t* key, uint32_t counter, uint32_t* nonce) {
+    memset(ctx, 0, sizeof(struct chacha_ctx));
+    memcpy(ctx->state, CHACONST, 4 * sizeof(uint32_t));
+    memcpy(ctx->state+4, key, 8 * sizeof(uint32_t));
+    ctx->state[12] = counter;
+    memcpy(ctx->state+13, nonce, 3 * sizeof(uint32_t));
+    ctx->counter = &ctx->state[12];
+}
+
+void set_counter(struct chacha_ctx* ctx, uint32_t counter) {
+    *ctx->counter = counter;
+}
+
 int main(int argc, char* argv[]) {
     uint32_t key[8] = {0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
                     0x13121110, 0x17161514, 0x1b1a1918, 0x1f1e1d1c};
+    uint32_t counter = 1;
     uint32_t nonce[3] = {0x00000000, 0x4a000000, 0x00000000};
-    // char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
-    // char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    // char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    // int len = strlen(plaintext);
-    // chacha20_encrypt(plaintext, result, len, key, counter, nonce);
-    // chacha20_encrypt(result, dc, len, key, counter, nonce);
-    // for (int i = 0; i < len; i++) {
-    //     if (i != 0 && i%16 == 0) {
-    //         printf("\n");
-    //     }
-    //     printf("%02x ", (unsigned char)dc[i]);
-    // }
-    // printf("%s\n", plaintext);
-    char* tt = "googlechrome.dmg";
-    clock_t t;
-    t = clock();
-    file_cipher(tt, key, nonce);
-    t = clock() - t;
-    double time_taken = ((double)t)/CLOCKS_PER_SEC; // calculate the elapsed time
-    printf("The program took %f seconds to execute", time_taken);
+    struct chacha_ctx* ctx = malloc(sizeof(struct chacha_ctx));
+    init_chacha_ctx(ctx, key, counter, nonce);
+    char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+    char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    strcpy(result, plaintext);
+    char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
+    int len = strlen(plaintext);
+    chacha20_xor(ctx, result, len);
+    set_counter(ctx, 1);
+    chacha20_xor(ctx, result, len);
+    for (int i = 0; i < len; i++) {
+        if (i != 0 && i%16 == 0) {
+            printf("\n");
+        }
+        printf("%02x ", (unsigned char)result[i]);
+    }
+    printf("\n");
+    printf("%s\n", result);
+    // char* tt = "test.tar.gz";
+    // clock_t t;
+    // t = clock();
+    // file_xor(ctx, tt);
+    // t = clock() - t;
+    // double time_taken = ((double)t)/CLOCKS_PER_SEC; // calculate the elapsed time
+    // printf("The program took %f seconds to execute\n", time_taken);
 }
