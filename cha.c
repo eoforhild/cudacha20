@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <getopt.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
@@ -63,13 +64,17 @@ void chacha20_xor(struct chacha_ctx* ctx, char* buf, int len) {
     }
 }
 
-void file_xor(struct chacha_ctx* ctx, char* path) {
+void file_xor(struct chacha_ctx* ctx, char* i, char* o) {
     int CHUNKSIZE = 65536;
     char buf[CHUNKSIZE];
     int len = 0;
 
-    FILE* input = fopen(path, "r");
-    FILE* output = fopen("out.bin", "w");
+    FILE* input = fopen(i, "r");
+    if (!input) {
+        printf("Input file does not exist\n");
+        exit(EXIT_FAILURE);
+    }
+    FILE* output = fopen(o, "w");
     do {
         len = fread((void*)buf, sizeof(char), CHUNKSIZE, input);
         chacha20_xor(ctx, buf, len);
@@ -93,33 +98,36 @@ void set_counter(struct chacha_ctx* ctx, uint32_t counter) {
 }
 
 int main(int argc, char* argv[]) {
+    int c;
+    char *ip = NULL;
+    char *op = NULL;
+    while ((c = getopt(argc, argv, "i:o:")) != -1) {
+        switch (c) {
+            case 'i':
+                ip = optarg;
+                break;
+            case 'o':
+                op = optarg;
+                break;
+            case '?':
+                exit(EXIT_FAILURE);
+        }
+    }
+    if (!ip || !op) {
+        printf("Need -i and -o for input and output respectively\n");
+        exit(EXIT_FAILURE);
+    }
+
     uint32_t key[8] = {0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
                     0x13121110, 0x17161514, 0x1b1a1918, 0x1f1e1d1c};
     uint32_t counter = 1;
     uint32_t nonce[3] = {0x00000000, 0x4a000000, 0x00000000};
-    struct chacha_ctx* ctx = malloc(sizeof(struct chacha_ctx));
-    init_chacha_ctx(ctx, key, counter, nonce);
-    char* plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
-    char* result = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    strcpy(result, plaintext);
-    char* dc = (char*)malloc(strlen(plaintext)*sizeof(char) + 1);
-    int len = strlen(plaintext);
-    chacha20_xor(ctx, result, len);
-    set_counter(ctx, 1);
-    chacha20_xor(ctx, result, len);
-    for (int i = 0; i < len; i++) {
-        if (i != 0 && i%16 == 0) {
-            printf("\n");
-        }
-        printf("%02x ", (unsigned char)result[i]);
-    }
-    printf("\n");
-    printf("%s\n", result);
-    // char* tt = "test.tar.gz";
-    // clock_t t;
-    // t = clock();
-    // file_xor(ctx, tt);
-    // t = clock() - t;
-    // double time_taken = ((double)t)/CLOCKS_PER_SEC; // calculate the elapsed time
-    // printf("The program took %f seconds to execute\n", time_taken);
+    struct chacha_ctx ctx;
+    init_chacha_ctx(&ctx, key, counter, nonce);
+    clock_t t;
+    t = clock();
+    file_xor(&ctx, ip, op);
+    t = clock() - t;
+    double time_taken = ((double)t)/CLOCKS_PER_SEC; // calculate the elapsed time
+    printf("The program took %f seconds to execute\n", time_taken);
 }
