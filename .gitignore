@@ -1,2 +1,6 @@
 /libsodium
 /.vscode
+*.bin
+*.tar.gz
+*.txt
+cha
