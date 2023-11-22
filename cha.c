@@ -66,7 +66,7 @@ void chacha20_xor(struct chacha_ctx* ctx, char* buf, int len) {
 
 #define CHUNKSIZE 65536
 void file_xor(struct chacha_ctx* ctx, char* i, char* o) {
-    char buf[CHUNKSIZE];
+    char* buf = (char*)malloc(CHUNKSIZE);
     int len = 0;
 
     FILE* input = fopen(i, "r");
@@ -74,14 +74,16 @@ void file_xor(struct chacha_ctx* ctx, char* i, char* o) {
         printf("Input file does not exist\n");
         exit(EXIT_FAILURE);
     }
-    FILE* output = fopen(o, "w");
+    FILE* output;
+    if (o) output = fopen(o, "w");
     do {
         len = fread((void*)buf, sizeof(char), CHUNKSIZE, input);
         chacha20_xor(ctx, buf, len);
-        // fwrite(buf, sizeof(char), len, output);
+        if (o) fwrite(buf, sizeof(char), len, output);
     } while (len == CHUNKSIZE);
     fclose(input);
-    fclose(output);
+    if (o) fclose(output);
+    free(buf);
 }
 
 void init_chacha_ctx(struct chacha_ctx* ctx, uint32_t* key, uint32_t counter, uint32_t* nonce) {
@@ -112,8 +114,8 @@ int main(int argc, char* argv[]) {
                 exit(EXIT_FAILURE);
         }
     }
-    if (!ip || !op) {
-        printf("Need -i and -o for input and output respectively\n");
+    if (!ip) {
+        printf("Need -i for input, -o is optional for output\n");
         exit(EXIT_FAILURE);
     }
 
