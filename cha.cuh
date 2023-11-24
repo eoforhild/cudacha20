@@ -9,7 +9,12 @@ struct chacha_ctx {
 
 struct args {
     struct chacha_ctx ctx;
-    uint32_t tid;
     FILE* input;
     FILE* output;
 }
+
+;enum Threading {
+    SINGLE_THREAD,
+    MULTI_THREAD,
+    GPU_THREAD
+};
