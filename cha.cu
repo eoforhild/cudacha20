@@ -12,9 +12,14 @@
 #include <iostream>
 using namespace std;
 
+uint32_t ks = 28;
 const uint32_t CHUNKSIZE = 65536;
 const uint32_t CHACONST[4] = {0x61707865, 0x3320646e, 0x79622d32, 0x6b206574};
 pthread_mutex_t r_lock;
+
+// GPU constants
+#define KS_SIZE ((uint32_t)1<<ks)
+#define THREADS_PER_BLOCK 512 // Probably the best
 
 /* Left rotation of n by d bits */
 #define ROTL32(n, d) (n << d) | (n >> (32 - d))
@@ -39,18 +44,18 @@ __global__ void d_chacha20_xor(
     uint32_t* d_state,
     char* d_buf
 ) {
-    extern __shared__ uint32_t state[16];
+    extern __shared__ uint32_t total[16+(THREADS_PER_BLOCK*16)];
+    uint32_t* state = &total[0];
     // copy the default state to shared mem
-    if (threadIdx.x == 0) {
-        for (int i = 0; i < 16; i++) {
-            state[i] = d_state[i];
-        }
+    if (threadIdx.x < 16) {
+        state[threadIdx.x] = d_state[threadIdx.x];
     }
     __syncthreads();
 
+    uint32_t* block_ct = &total[16];
     int global_id = blockIdx.x*blockDim.x + threadIdx.x;
-    // Not actually local just pointer to d_ciphertext
-    uint32_t* local_ct = &d_ciphertext[global_id*16];
+    // Localized for each thread
+    uint32_t* local_ct = &block_ct[threadIdx.x*16];
     for (int i = 0; i < 16; i++) local_ct[i] = state[i];
     // Adjust counter relative to thread id
     local_ct[12] = state[12] + global_id;
@@ -82,9 +87,16 @@ __global__ void d_chacha20_xor(
     local_ct[14] += state[14];
     local_ct[15] += state[15];
     
+    // XOR the keystream with the buffer
     char* local_buf = &d_buf[global_id*64];
     for (int i = 0; i < 64; i++) {
         ((char*)local_ct)[i] ^= local_buf[i];
+    }
+
+    // Copy back into global memory
+    uint32_t* stream_ptr = &d_ciphertext[global_id*16];
+    for (int i = 0; i < 16; i++) {
+        stream_ptr[i] = local_ct[i];
     }
 }
 
@@ -140,30 +152,29 @@ void init_chacha_ctx(struct chacha_ctx* ctx, uint32_t* key, uint32_t counter, ui
 }
 
 void file_xor_gpu(struct chacha_ctx* ctx, FILE* input, FILE* output) {
-    uint32_t ks_size = 1<<28;
-    uint32_t ctr_skip = ks_size/64;
-    char* buf = (char*)malloc(ks_size);
+    uint32_t ctr_skip = KS_SIZE/64;
+    char* buf = (char*)malloc(KS_SIZE);
     int readlen = 0;
 
     // Keystream is either 8, 16, 32, 64, 128, 256 MB
     uint32_t *d_ciphertext, *d_state;
     char* d_buf;
-    cudaMalloc((void**)&d_ciphertext, ks_size);
+    cudaMalloc((void**)&d_ciphertext, KS_SIZE);
     cudaMalloc((void**)&d_state, 16*sizeof(uint32_t));
-    cudaMalloc((void**)&d_buf, ks_size);
+    cudaMalloc((void**)&d_buf, KS_SIZE);
     int times = 0;
     do {
-        readlen = fread((void*)buf, sizeof(char), ks_size, input);
+        readlen = fread((void*)buf, sizeof(char), KS_SIZE, input);
         // Set counter per n MB ciphertext encrypted
         set_counter(ctx, (ctr_skip*times) + 1);
         cudaMemcpy(d_state, ctx->state, 16*sizeof(uint32_t), cudaMemcpyHostToDevice);
         cudaMemcpy(d_buf, buf, readlen, cudaMemcpyHostToDevice);
-        d_chacha20_xor<<<8192, 512>>>(d_ciphertext, d_state, d_buf);
+        d_chacha20_xor<<<(KS_SIZE/64)/THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(d_ciphertext, d_state, d_buf);
         cudaDeviceSynchronize();
         cudaMemcpy(buf, d_ciphertext, readlen, cudaMemcpyDeviceToHost);
         if (output) fwrite(buf, sizeof(char), readlen, output);
         times += 1;
-    } while (readlen == ks_size);
+    } while (readlen == KS_SIZE);
     free(buf);
     cudaFree(d_ciphertext);
     cudaFree(d_state);
@@ -171,13 +182,16 @@ void file_xor_gpu(struct chacha_ctx* ctx, FILE* input, FILE* output) {
 }
 
 void gpu(uint32_t* key, uint32_t counter, uint32_t* nonce, char* ip, char* op) {
-    FILE* input = fopen(ip, "r");
+    FILE* input = fopen(ip, "rb");
     if (!input) {
         printf("Input file does not exist\n");
         exit(EXIT_FAILURE);
     }
     FILE* output;
-    if (op) output = fopen(op, "w");
+    if (op){
+        remove(op);
+        output = fopen(op, "wb");
+    }
 
     struct chacha_ctx ctx;
     init_chacha_ctx(&ctx, key, counter, nonce);
@@ -223,6 +237,7 @@ void multi(uint32_t* key, uint32_t counter, uint32_t* nonce, char* ip, char* op,
     FILE* output = NULL;
     // Basically write zeroes to the file beforehand
     if (op) {
+        remove(op);
         output = fopen(op, "w");
         fseek(input, 0, SEEK_END);
         long end = ftell(input);
@@ -291,7 +306,10 @@ void single(uint32_t* key, uint32_t counter, uint32_t* nonce, char* ip, char* op
         exit(EXIT_FAILURE);
     }
     FILE* output = NULL;
-    if (op) output = fopen(op, "w");
+    if (op) {
+        remove(op);
+        output = fopen(op, "w");
+    }
 
     struct chacha_ctx ctx;
     init_chacha_ctx(&ctx, key, counter, nonce);
@@ -308,7 +326,7 @@ int main(int argc, char* argv[]) {
     int num_workers = 0;
     bool g = false;
     enum Threading prog_t = SINGLE_THREAD;
-    while ((c = getopt(argc, argv, "i:o:t:g")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:t:g:")) != -1) {
         switch (c) {
             case 'i':
                 ip = optarg;
@@ -324,6 +342,29 @@ int main(int argc, char* argv[]) {
             case 'g':
                 g = true;
                 prog_t = GPU_THREAD;
+                switch (atoi(optarg)) {
+                    case 8:
+                        ks = 23;
+                        break;
+                    case 16:
+                        ks = 24;
+                        break;
+                    case 32:
+                        ks = 25;
+                        break;
+                    case 64:
+                        ks = 26;
+                        break;
+                    case 128:
+                        ks = 27;
+                        break;
+                    case 256:
+                        ks = 28;
+                        break;
+                    default:
+                        printf("The only supported keystream sizes are 8, 16, 32, 64, 128, 256 MBs.\n");
+                        exit(EXIT_FAILURE);
+                }
                 break;
             case '?':
                 exit(EXIT_FAILURE);
