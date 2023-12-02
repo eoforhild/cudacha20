@@ -10,7 +10,7 @@
 using namespace std;
 
 /**
- * ALL CONSTANTS IN THE PROGRAM ARE IN utils.h
+ * ALL CONSTANTS IN THE PROGRAM ARE IN impl.cuh
 */
 
 uint32_t ks = 28; // Just for changing GPU keysize
@@ -28,8 +28,9 @@ int main(int argc, char* argv[]) {
     bool t = false;
     int num_workers = 0;
     bool g = false;
+    bool data = false;
     enum Threading prog_t = SINGLE_THREAD;
-    while ((c = getopt(argc, argv, "i:o:t:g:")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:t:g:d")) != -1) {
         switch (c) {
             case 'i':
                 ip = optarg;
@@ -68,6 +69,9 @@ int main(int argc, char* argv[]) {
                         printf("The only supported keystream sizes are 8, 16, 32, 64, 128, 256 MBs.\n");
                         exit(EXIT_FAILURE);
                 }
+                break;
+            case 'd':
+                data = true;
                 break;
             case '?':
                 exit(EXIT_FAILURE);
@@ -114,5 +118,8 @@ int main(int argc, char* argv[]) {
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = end.tv_sec - start.tv_sec;
     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-    printf("The program took %f seconds to execute\n", elapsed);
+    printf("%f", elapsed);
+    if (!data) {
+        printf(" seconds elapsed\n");
+    }
 }

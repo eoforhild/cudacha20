@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+// Constant for CPU threading version, read and write in this chunksize
 const uint32_t CHUNKSIZE = 65536;
 
 // GPU constants

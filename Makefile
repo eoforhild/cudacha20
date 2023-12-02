@@ -1,5 +1,5 @@
 CC=nvcc
-FILES=main.cu impl.cu chacha20.cpp
+FILES=./src/main.cu ./src/impl.cu ./src/chacha20.cpp
 
-all: main.cu
+all: ./src/main.cu
 	$(CC) -O3 --use_fast_math $(FILES) -o cha
