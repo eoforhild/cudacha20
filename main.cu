@@ -4,9 +4,7 @@
 #include <time.h>
 #include <string.h>
 
-#include "impl_single.h"
-#include "impl_multi.h"
-#include "impl_gpu.cuh"
+#include "impl.cuh"
 
 #include <iostream>
 using namespace std;
