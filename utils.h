@@ -1,12 +1,5 @@
 #include <stdint.h>
 
-const uint32_t CHUNKSIZE = 65536;
-
-// GPU constants
-extern uint32_t ks;
-#define KS_SIZE ((uint32_t)1<<ks)
-#define THREADS_PER_BLOCK 128 // Probably the best
-
 /* Left rotation of n by d bits */
 #define ROTL32(n, d) (n << d) | (n >> (32 - d))
 

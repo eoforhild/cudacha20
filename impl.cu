@@ -3,6 +3,7 @@
 #include <semaphore.h>
 
 #include "chacha20.h"
+#include "impl.cuh"
 #include "utils.h"
 
 #include <iostream>
