@@ -13,7 +13,7 @@ using namespace std;
  * ALL CONSTANTS IN THE PROGRAM ARE IN impl.cuh
 */
 
-uint32_t ks = 28; // Just for changing GPU keysize
+uint32_t ks = 28; // Just for changing GPU keysize, default at 2^28
 
 enum Threading {
     SINGLE_THREAD,
@@ -47,6 +47,15 @@ int main(int argc, char* argv[]) {
                 g = true;
                 prog_t = GPU_THREAD;
                 switch (atoi(optarg)) {
+                    case 1:
+                        ks = 20;
+                        break;
+                    case 2:
+                        ks = 21;
+                        break;
+                    case 4:
+                        ks = 22;
+                        break;
                     case 8:
                         ks = 23;
                         break;
@@ -66,7 +75,7 @@ int main(int argc, char* argv[]) {
                         ks = 28;
                         break;
                     default:
-                        printf("The only supported keystream sizes are 8, 16, 32, 64, 128, 256 MBs.\n");
+                        printf("The only supported keystream sizes are 1, 2, 4, 8, 16, 32, 64, 128, 256 MBs.\n");
                         exit(EXIT_FAILURE);
                 }
                 break;
