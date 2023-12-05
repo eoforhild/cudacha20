@@ -14,12 +14,17 @@ using namespace std;
 */
 
 uint32_t ks = 28; // Just for changing GPU keysize, default at 2^28
+uint32_t CHUNKSIZE = 65536;
 
 enum Threading {
     SINGLE_THREAD,
     MULTI_THREAD,
     GPU_THREAD
 };
+
+bool is_power_two(uint32_t n) {
+    return (n & (n - 1)) == 0;
+}
 
 int main(int argc, char* argv[]) {
     int c;
@@ -30,7 +35,7 @@ int main(int argc, char* argv[]) {
     bool g = false;
     bool data = false;
     enum Threading prog_t = SINGLE_THREAD;
-    while ((c = getopt(argc, argv, "i:o:t:g:d")) != -1) {
+    while ((c = getopt(argc, argv, "i:o:t:g:c:d")) != -1) {
         switch (c) {
             case 'i':
                 ip = optarg;
@@ -77,6 +82,13 @@ int main(int argc, char* argv[]) {
                     default:
                         printf("The only supported keystream sizes are 1, 2, 4, 8, 16, 32, 64, 128, 256 MBs.\n");
                         exit(EXIT_FAILURE);
+                }
+                break;
+            case 'c':
+                CHUNKSIZE = (uint32_t)atoi(optarg);
+                if (!is_power_two(CHUNKSIZE) || !(CHUNKSIZE >= 1024 && CHUNKSIZE <= 131072)) {
+                    printf("The only supported chunksizes are 1, 2, 4, 8, 16, 32, 64, 128 KBs.\n");
+                    exit(EXIT_FAILURE);
                 }
                 break;
             case 'd':
