@@ -18,8 +18,13 @@ Poly1305 authenticator, so it is definitely not safe to use anyway.
 Just a simple "make" will automatically get everything set up.
 
 ./cha has several arguments:
+
 -i (required): tells the program where the input file is
+
 -o (optional): tells the program where to dump the encrypted file
+
 -t (optional): tells the program to use threads with a specified number of threads
+
 -c (optional, only when -t is specified): tells the program to use this chunk size
+
 -g (optional): tells the program to use GPU with a keystream of specified size
